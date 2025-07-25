@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # attendance_manager
 
 A new Flutter project.
@@ -14,3 +15,6 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+=======
+# attendance_manager_app
+>>>>>>> 9299d56a41324b90cb220cf5a96136bf5fc16d79
