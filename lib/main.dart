@@ -1,39 +1,59 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(PersonalAttendanceApp());
 }
 
+// Models
 
-class SplashScreen extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.blue[800],
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.assignment_turned_in, size: 80, color: Colors.white),
-            SizedBox(height: 30),
-            Text(
-              "Manage your attendance",
-              style: TextStyle(
-                fontSize: 26,
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+class AttendanceEntry {
+  DateTime dateTime;
+  bool present;
+  String note;
+
+  AttendanceEntry({
+    required this.dateTime,
+    required this.present,
+    this.note = "",
+  });
+
+  Map<String, dynamic> toJson() => {
+        'dateTime': dateTime.toIso8601String(),
+        'present': present,
+        'note': note,
+      };
+
+  static AttendanceEntry fromJson(Map<String, dynamic> json) => AttendanceEntry(
+        dateTime: DateTime.parse(json['dateTime']),
+        present: json['present'],
+        note: json['note'] ?? "",
+      );
 }
 
+class Subject {
+  String name;
+  List<AttendanceEntry> attendanceHistory;
+
+  Subject(this.name, [this.attendanceHistory = const []]);
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'attendanceHistory':
+            attendanceHistory.map((a) => a.toJson()).toList(),
+      };
+
+  static Subject fromJson(Map<String, dynamic> json) => Subject(
+        json['name'],
+        (json['attendanceHistory'] as List<dynamic>?)
+                ?.map((e) => AttendanceEntry.fromJson(e))
+                .toList() ??
+            [],
+      );
+}
+
+// Main App
 
 class PersonalAttendanceApp extends StatefulWidget {
   @override
@@ -71,26 +91,43 @@ class _PersonalAttendanceAppState extends State<PersonalAttendanceApp> {
       home: _showSplash
           ? SplashScreen()
           : SubjectListScreen(
-        darkMode: _darkMode,
-        setDarkMode: (v) => setState(() => _darkMode = v),
+              darkMode: _darkMode,
+              setDarkMode: (v) => setState(() => _darkMode = v),
+            ),
+    );
+  }
+}
+
+// Splash Screen
+
+class SplashScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.blue[800],
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.assignment_turned_in, size: 80, color: Colors.white),
+            SizedBox(height: 30),
+            Text(
+              "Manage your attendance",
+              style: TextStyle(
+                fontSize: 26,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-
-class AttendanceEntry {
-  final DateTime dateTime;
-  final bool present;
-  final String note;
-  AttendanceEntry({required this.dateTime, required this.present, this.note = ""});
-}
-
-class Subject {
-  final String name;
-  List<AttendanceEntry> attendanceHistory = [];
-  Subject(this.name);
-}
 
 
 class SubjectListScreen extends StatefulWidget {
@@ -103,6 +140,47 @@ class SubjectListScreen extends StatefulWidget {
 
 class _SubjectListScreenState extends State<SubjectListScreen> {
   List<Subject> subjects = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSubjects();
+  }
+
+  Future<void> _loadSubjects() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getStringList('subjects') ?? [];
+    setState(() {
+      subjects = data
+          .map((s) => Subject.fromJson(jsonDecode(s)))
+          .toList();
+    });
+  }
+
+  Future<void> _saveSubjects() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+        'subjects', subjects.map((s) => jsonEncode(s.toJson())).toList());
+  }
+
+  void _addSubject(String name) {
+    setState(() {
+      subjects.add(Subject(name, []));
+    });
+    _saveSubjects();
+  }
+
+  void _removeSubject(Subject subject) {
+    setState(() {
+      subjects.remove(subject);
+    });
+    _saveSubjects();
+  }
+
+  void _updateSubject(Subject subject) {
+    setState(() {});
+    _saveSubjects();
+  }
 
   void _showAddSubjectDialog() {
     final controller = TextEditingController();
@@ -124,9 +202,7 @@ class _SubjectListScreenState extends State<SubjectListScreen> {
             onPressed: () {
               final name = controller.text.trim();
               if (name.isNotEmpty && !subjects.any((s) => s.name == name)) {
-                setState(() {
-                  subjects.add(Subject(name));
-                });
+                _addSubject(name);
                 Navigator.pop(context);
               }
             },
@@ -147,9 +223,7 @@ class _SubjectListScreenState extends State<SubjectListScreen> {
           TextButton(onPressed: ()=>Navigator.pop(context), child: Text("Cancel")),
           ElevatedButton(
             onPressed: () {
-              setState(() {
-                subjects.remove(subject);
-              });
+              _removeSubject(subject);
               Navigator.pop(context);
             },
             child: Text("Delete"),
@@ -164,9 +238,14 @@ class _SubjectListScreenState extends State<SubjectListScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => SubjectAttendanceScreen(subject: subject),
+        builder: (_) => SubjectAttendanceScreen(
+            subject: subject,
+            onChanged: () {
+              _updateSubject(subject);
+            }
+        ),
       ),
-    ).then((_) => setState(() {}));
+    );
   }
 
   double _calcPercentage(Subject s) {
@@ -281,9 +360,11 @@ class _SubjectListScreenState extends State<SubjectListScreen> {
 }
 
 
+
 class SubjectAttendanceScreen extends StatefulWidget {
   final Subject subject;
-  SubjectAttendanceScreen({required this.subject});
+  final VoidCallback? onChanged;
+  SubjectAttendanceScreen({required this.subject, this.onChanged});
 
   @override
   _SubjectAttendanceScreenState createState() => _SubjectAttendanceScreenState();
@@ -295,9 +376,9 @@ class _SubjectAttendanceScreenState extends State<SubjectAttendanceScreen> {
   List<AttendanceEntry> get _entriesForDay {
     final list = widget.subject.attendanceHistory
         .where((e) =>
-    e.dateTime.year == _selectedDate.year &&
-        e.dateTime.month == _selectedDate.month &&
-        e.dateTime.day == _selectedDate.day)
+            e.dateTime.year == _selectedDate.year &&
+            e.dateTime.month == _selectedDate.month &&
+            e.dateTime.day == _selectedDate.day)
         .toList();
     list.sort((a, b) => b.dateTime.compareTo(a.dateTime));
     return list;
@@ -335,16 +416,70 @@ class _SubjectAttendanceScreenState extends State<SubjectAttendanceScreen> {
             onPressed: () {
               setState(() {
                 widget.subject.attendanceHistory.add(
-                    AttendanceEntry(
-                      dateTime: DateTime.now(),
-                      present: present,
-                      note: noteController.text.trim(),
-                    )
+                  AttendanceEntry(
+                    dateTime: DateTime.now(),
+                    present: present,
+                    note: noteController.text.trim(),
+                  ),
                 );
               });
+              widget.onChanged?.call();
               Navigator.pop(context);
             },
             child: Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _deleteAttendance(AttendanceEntry entry) {
+    setState(() {
+      widget.subject.attendanceHistory.remove(entry);
+    });
+    widget.onChanged?.call();
+  }
+
+  void _editAttendance(AttendanceEntry entry) async {
+    TextEditingController noteController = TextEditingController(text: entry.note);
+    bool? isPresent = entry.present;
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Edit Attendance'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButton<bool>(
+              value: isPresent,
+              onChanged: (v) {
+                setState(() {
+                  isPresent = v!;
+                });
+              },
+              items: [
+                DropdownMenuItem(child: Text('Present'), value: true),
+                DropdownMenuItem(child: Text('Absent'), value: false),
+              ],
+            ),
+            TextField(
+              controller: noteController,
+              decoration: InputDecoration(hintText: "Optional note"),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: ()=> Navigator.pop(context), child: Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                entry.present = isPresent!;
+                entry.note = noteController.text.trim();
+              });
+              widget.onChanged?.call();
+              Navigator.pop(context);
+            },
+            child: Text('Save'),
           ),
         ],
       ),
@@ -447,15 +582,29 @@ class _SubjectAttendanceScreenState extends State<SubjectAttendanceScreen> {
               itemCount: _entriesForDay.length,
               itemBuilder: (_, idx) {
                 final entry = _entriesForDay[idx];
-                return Card(
-                  margin: EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  child: ListTile(
-                    leading: Icon(
-                      entry.present ? Icons.check_circle : Icons.cancel,
-                      color: entry.present ? Colors.green : Colors.red,
+                return Dismissible(
+                  key: ObjectKey(entry),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    color: Colors.red,
+                    alignment: Alignment.centerRight,
+                    padding: EdgeInsets.only(right: 20),
+                    child: Icon(Icons.delete, color: Colors.white),
+                  ),
+                  onDismissed: (_) => _deleteAttendance(entry),
+                  child: Card(
+                    margin: EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    child: ListTile(
+                      leading: Icon(
+                        entry.present ? Icons.check_circle : Icons.cancel,
+                        color: entry.present ? Colors.green : Colors.red,
+                      ),
+                      title: Text('${entry.present ? "Present" : "Absent"}${entry.note.isNotEmpty ? " (${entry.note})": ""}'),
+                      subtitle: Text('${entry.dateTime.hour.toString().padLeft(2,'0')}:${entry.dateTime.minute.toString().padLeft(2,'0')}'),
+                      onTap: () => _editAttendance(entry),
+                      // Long-press to edit also possible:
+                      onLongPress: () => _editAttendance(entry),
                     ),
-                    title: Text('${entry.present ? "Present" : "Absent"}${entry.note.isNotEmpty ? " (${entry.note})": ""}'),
-                    subtitle: Text('${entry.dateTime.hour.toString().padLeft(2,'0')}:${entry.dateTime.minute.toString().padLeft(2,'0')}'),
                   ),
                 );
               },
